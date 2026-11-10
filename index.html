@@ -1,0 +1,344 @@
+<title>Brinco Nocturno</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap">
+<style>
+  :root{
+    --night:#1b1830; --panel:#241f3d; --line:#3a3363;
+    --sand:#f2c14e; --mint:#7fe0c4; --coral:#ef6f6c; --bone:#f4ecd8; --dim:#9a93c4;
+  }
+  html,body{height:100%}
+  body{background:var(--night);color:var(--bone);font-family:"VT323",ui-monospace,monospace;font-size:20px;
+    padding-inline:16px;padding-block:24px;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;gap:16px}
+  header{width:100%;max-width:960px;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px}
+  h1{font-family:"Press Start 2P",ui-monospace,monospace;font-size:clamp(14px,3.2vw,22px);margin:0;letter-spacing:.04em;color:var(--sand);text-wrap:balance}
+  .best{color:var(--dim);font-variant-numeric:tabular-nums}
+  .best b{color:var(--mint);font-weight:normal}
+  .frame{width:100%;max-width:960px;border:4px solid var(--line);background:var(--panel);box-shadow:0 0 0 4px var(--night),0 0 0 8px var(--line);touch-action:manipulation;user-select:none;-webkit-user-select:none}
+  canvas{display:block;width:100%;aspect-ratio:320/120;image-rendering:pixelated;image-rendering:crisp-edges;cursor:pointer}
+  .hint{width:100%;max-width:960px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--dim)}
+  kbd{font-family:inherit;color:var(--bone);border:2px solid var(--line);padding:0 6px;background:var(--panel)}
+  button{font-family:"Press Start 2P",ui-monospace,monospace;font-size:10px;color:var(--bone);background:var(--panel);border:2px solid var(--line);padding:8px 10px;cursor:pointer}
+  button:focus-visible,canvas:focus-visible{outline:3px solid var(--sand);outline-offset:3px}
+</style>
+
+<header>
+  <h1>BRINCO NOCTURNO</h1>
+  <div class="best">Récord: <b id="best">0</b></div>
+</header>
+
+<div class="frame"><canvas id="game" width="960" height="360" tabindex="0" aria-label="Juego: toca o presiona espacio para saltar"></canvas></div>
+
+<div class="hint">
+  <span><kbd>Espacio</kbd> / <kbd>↑</kbd> o toca la pantalla para saltar · mantén presionado para saltar más alto</span>
+  <button id="mute" type="button">SONIDO: SÍ</button>
+</div>
+
+<script>
+(() => {
+  const W = 320, H = 120, GROUND = 102;
+  const cv = document.getElementById('game');
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(3,0,0,3,0,0); ctx.imageSmoothingEnabled = false;
+
+  const C = { night:'#1b1830', sky2:'#2a2450', hill:'#332c63', hill2:'#40377a', sand:'#f2c14e', sandDk:'#b8862a',
+              mint:'#7fe0c4', mintDk:'#3fa38a', coral:'#ef6f6c', coralDk:'#a8403f', bone:'#f4ecd8', ink:'#120f22', dim:'#9a93c4' };
+
+  // ---------- Sprites (arte de pixeles hecho en código) ----------
+  const PAL = { o:C.ink, y:C.bone, c:C.mint, d:C.mintDk, s:C.sand, r:C.coral, R:C.coralDk, b:C.sandDk };
+  function sprite(rows){
+    const h = rows.length, w = rows[0].length;
+    const off = document.createElement('canvas'); off.width = w; off.height = h;
+    const g = off.getContext('2d');
+    rows.forEach((row,y)=>[...row].forEach((ch,x)=>{ if(PAL[ch]){ g.fillStyle = PAL[ch]; g.fillRect(x,y,1,1);} }));
+    return off;
+  }
+  const runA = sprite([
+    "...oooo...",
+    "..occcco..",
+    ".occyyyyo.",
+    ".ocyoyoyo.",
+    ".ocyyyyyo.",
+    "..oooooo..",
+    ".occccccco",
+    "occdcccco.",
+    ".ooccccoo.",
+    "..occdco..",
+    ".oco..oco.",
+    ".oo....oo.",
+  ]);
+  const runB = sprite([
+    "...oooo...",
+    "..occcco..",
+    ".occyyyyo.",
+    ".ocyoyoyo.",
+    ".ocyyyyyo.",
+    "..oooooo..",
+    "ocdcccccco",
+    ".occcccco.",
+    "..occcco..",
+    "..occdco..",
+    "..oco.oo..",
+    "..ooo.....",
+  ]);
+  const jump = sprite([
+    "...oooo...",
+    "..occcco..",
+    ".occyyyyo.",
+    ".ocyoyoyo.",
+    ".ocyyyyyo.",
+    "o.oooooo.o",
+    "occcccccco",
+    ".occdccco.",
+    "..occcco..",
+    ".occo.occo",
+    ".oo.....oo",
+    "..........",
+  ]);
+  const dead = sprite([
+    "...oooo...",
+    "..occcco..",
+    ".occyyyyo.",
+    ".ocyoyoyo.",
+    ".ocyyyyyo.",
+    "..oooooo..",
+    ".occccccco",
+    "occdcccco.",
+    ".ooccccoo.",
+    "..occdco..",
+    ".oco..oco.",
+    ".oo....oo.",
+  ]);
+  const crate = sprite([
+    "oooooooooo",
+    "osssssssso",
+    "osbsssbsso",
+    "ossbsbssso",
+    "osssbsssso",
+    "ossbsbssso",
+    "osbsssbsso",
+    "osssssssso",
+    "obbbbbbbbo",
+    "oooooooooo",
+  ]);
+  const cone = sprite([
+    "...oo...",
+    "...rr...",
+    "..orro..",
+    "..oyyo..",
+    "..orro..",
+    ".orrrro.",
+    ".oyyyyo.",
+    ".orrrro.",
+    "orrrrrro",
+    "oRRRRRRo",
+    "oooooooo",
+  ]);
+  const coin = [sprite(["..oo..",".osso.","osysso","ossbso",".osbo.","..oo.."]),
+                sprite(["..oo..","..os..",".osyo.",".osbo.","..ob..","..oo.."])];
+
+  // ---------- Fondo con paralaje ----------
+  const rand = (a,b)=>a+Math.random()*(b-a);
+  const stars = Array.from({length:40},()=>({x:rand(0,W),y:rand(4,60),t:rand(0,6)}));
+  function makeSkyline(n, minH, maxH, wMin, wMax){
+    const arr=[]; let x=0; while(x<W*2){ const w=Math.round(rand(wMin,wMax)); arr.push({x,w,h:Math.round(rand(minH,maxH))}); x+=w+Math.round(rand(0,6)); } return {blocks:arr,len:x};
+  }
+  const far = makeSkyline(0, 10, 34, 10, 26), near = makeSkyline(0, 6, 20, 14, 30);
+
+  // ---------- Sonido ----------
+  let actx=null, muted=false;
+  function beep(freq, dur, type='square', vol=.05, slide=0){
+    if(muted) return;
+    try{
+      actx = actx || new (window.AudioContext||window.webkitAudioContext)();
+      const o=actx.createOscillator(), g=actx.createGain(), t=actx.currentTime;
+      o.type=type; o.frequency.setValueAtTime(freq,t); if(slide) o.frequency.exponentialRampToValueAtTime(freq*slide,t+dur);
+      g.gain.setValueAtTime(vol,t); g.gain.exponentialRampToValueAtTime(.0001,t+dur);
+      o.connect(g).connect(actx.destination); o.start(t); o.stop(t+dur);
+    }catch(e){}
+  }
+
+  // ---------- Récord ----------
+  const bestEl = document.getElementById('best');
+  let best = 0;
+  try{ best = parseInt(localStorage.getItem('brinco-best')||'0',10)||0; }catch(e){}
+  bestEl.textContent = best;
+
+  // ---------- Estado del juego ----------
+  let state, p, obstacles, coins, parts, speed, dist, score, nextSpawn, nextCoin, shake, overAt, frame, holding;
+  function reset(){
+    p = { x:28, y:GROUND-12, w:10, h:12, vy:0, onGround:true };
+    obstacles=[]; coins=[]; parts=[];
+    speed=2.2; dist=0; score=0; nextSpawn=160; nextCoin=260; shake=0; frame=0;
+  }
+  reset(); state='ready';
+
+  function press(){
+    holding = true;
+    if(state==='ready'){ state='play'; doJump(); return; }
+    if(state==='over'){ if(performance.now()-overAt>450){ reset(); state='play'; } return; }
+    doJump();
+  }
+  function release(){
+    holding = false;
+    if(state==='play' && p.vy < -2.4) p.vy = -2.4; // salto variable
+  }
+  function doJump(){
+    if(!p.onGround) return;
+    p.vy = -6.1; p.onGround=false;
+    beep(520,.12,'square',.04,1.8);
+    for(let i=0;i<4;i++) parts.push({x:p.x+5,y:GROUND,vx:rand(-1,0.3),vy:rand(-1,-.2),life:18,col:C.dim});
+  }
+
+  addEventListener('keydown',e=>{
+    if(['Space','ArrowUp','KeyW'].includes(e.code)){ e.preventDefault(); if(!e.repeat) press(); }
+  });
+  addEventListener('keyup',e=>{ if(['Space','ArrowUp','KeyW'].includes(e.code)) release(); });
+  cv.addEventListener('pointerdown',e=>{ e.preventDefault(); cv.focus(); press(); });
+  addEventListener('pointerup',release);
+  addEventListener('pointercancel',release);
+
+  const muteBtn=document.getElementById('mute');
+  muteBtn.addEventListener('click',()=>{ muted=!muted; muteBtn.textContent='SONIDO: '+(muted?'NO':'SÍ'); });
+
+  // ---------- Lógica ----------
+  const TYPES = [
+    {img:crate, w:10, h:10, n:1},
+    {img:crate, w:10, h:10, n:2},
+    {img:cone,  w:8,  h:11, n:1},
+    {img:crate, w:10, h:10, n:1, stack:2},
+  ];
+  function spawn(){
+    const pool = dist<600 ? TYPES.slice(0,1).concat(TYPES[2]) : dist<1500 ? TYPES.slice(0,3) : TYPES;
+    const t = pool[Math.floor(Math.random()*pool.length)];
+    const stack = t.stack||1;
+    obstacles.push({x:W+4, y:GROUND-t.h*stack, w:t.w*t.n, h:t.h*stack, t, stack});
+    const gap = rand(95,190) + speed*14;
+    nextSpawn = gap;
+  }
+  function hit(a,b){ return a.x+2<b.x+b.w && a.x+a.w-2>b.x && a.y+2<b.y+b.h && a.y+a.h>b.y+1; }
+
+  function step(){
+    frame++;
+    if(state!=='play'){ updateParts(); return; }
+    speed = Math.min(6, speed + 0.0009);
+    dist += speed;
+    score = Math.floor(dist/6) + bonus;
+
+    // jugador
+    p.vy += holding && p.vy<0 ? 0.36 : 0.5;
+    p.y += p.vy;
+    if(p.y >= GROUND-p.h){
+      if(!p.onGround){ for(let i=0;i<3;i++) parts.push({x:p.x+5,y:GROUND,vx:rand(-1.2,-.2),vy:rand(-.8,-.1),life:14,col:C.dim}); }
+      p.y = GROUND-p.h; p.vy=0; p.onGround=true;
+    }
+
+    // obstáculos
+    nextSpawn -= speed; if(nextSpawn<=0) spawn();
+    for(const o of obstacles){ o.x -= speed; if(hit(p,o)) return gameOver(); }
+    obstacles = obstacles.filter(o=>o.x+o.w>-10);
+
+    // monedas
+    nextCoin -= speed;
+    if(nextCoin<=0){ coins.push({x:W+4,y:Math.round(rand(52,84)),w:6,h:6}); nextCoin=rand(220,420); }
+    for(const c of coins){ c.x -= speed;
+      if(!c.got && hit(p,c)){ c.got=true; bonus+=25; beep(880,.08,'square',.04); setTimeout(()=>beep(1320,.1,'square',.04),60);
+        for(let i=0;i<8;i++) parts.push({x:c.x+3,y:c.y+3,vx:rand(-1.5,1.5),vy:rand(-1.5,1.5),life:20,col:C.sand}); popup={x:c.x,y:c.y,life:30}; }
+    }
+    coins = coins.filter(c=>!c.got && c.x>-10);
+
+    if(score>0 && score%100===0 && score!==lastMilestone){ lastMilestone=score; beep(660,.08); setTimeout(()=>beep(990,.12),80); flash=10; }
+    updateParts();
+  }
+  let bonus=0, popup=null, lastMilestone=0, flash=0;
+  const _reset = reset; reset = function(){ _reset(); bonus=0; popup=null; lastMilestone=0; flash=0; };
+  reset();
+
+  function updateParts(){
+    for(const q of parts){ q.x+=q.vx - (state==='play'?speed*.3:0); q.y+=q.vy; q.vy+=.08; q.life--; }
+    parts = parts.filter(q=>q.life>0);
+    if(shake>0) shake*=.85;
+    if(popup){ popup.y-=.4; popup.life--; if(popup.life<=0) popup=null; }
+    if(flash>0) flash--;
+  }
+  function gameOver(){
+    state='over'; overAt=performance.now(); shake=4; holding=false;
+    beep(300,.35,'sawtooth',.05,.3);
+    for(let i=0;i<16;i++) parts.push({x:p.x+5,y:p.y+6,vx:rand(-2,2),vy:rand(-2.5,.5),life:30,col:i%2?C.mint:C.coral});
+    if(score>best){ best=score; bestEl.textContent=best; newBest=true; try{ localStorage.setItem('brinco-best',best);}catch(e){} } else newBest=false;
+  }
+  let newBest=false;
+
+  // ---------- Dibujo ----------
+  function text(str,x,y,col,size=8,align='left'){
+    ctx.font = size+'px "Press Start 2P", monospace'; ctx.textAlign=align; ctx.textBaseline='top';
+    ctx.fillStyle=C.ink; ctx.fillText(str,x+1,y+1); ctx.fillStyle=col; ctx.fillText(str,x,y);
+  }
+  function drawSkyline(sk, factor, col, base){
+    const off = (dist*factor) % sk.len;
+    ctx.fillStyle=col;
+    for(let k=0;k<2;k++) for(const b of sk.blocks){
+      const x = Math.round(b.x - off + k*sk.len); if(x>W||x+b.w<0) continue;
+      ctx.fillRect(x, base-b.h, b.w, b.h);
+    }
+  }
+  function draw(){
+    ctx.save();
+    if(shake>.3) ctx.translate(Math.round(rand(-shake,shake)),Math.round(rand(-shake,shake)));
+    // cielo
+    ctx.fillStyle=C.night; ctx.fillRect(-6,-6,W+12,H+12);
+    ctx.fillStyle=C.sky2; ctx.fillRect(-6,50,W+12,60);
+    // luna
+    ctx.fillStyle=C.bone; ctx.fillRect(264,12,8,16); ctx.fillRect(262,14,12,12); ctx.fillStyle=C.night; ctx.fillRect(268,12,8,12); ctx.fillRect(270,11,6,14);
+    // estrellas
+    for(const s of stars){ const x = Math.round((s.x - dist*.03) % W + W) % W; if(((frame/20+s.t)|0)%7!==0){ ctx.fillStyle=C.dim; ctx.fillRect(x,Math.round(s.y),1,1);} }
+    drawSkyline(far,.15,C.hill,GROUND-4);
+    drawSkyline(near,.4,C.hill2,GROUND);
+    // ventanitas en edificios cercanos
+    // suelo
+    ctx.fillStyle=C.sand; ctx.fillRect(-6,GROUND,W+12,1);
+    ctx.fillStyle=C.panel||'#241f3d'; ctx.fillRect(-6,GROUND+1,W+12,H-GROUND+6);
+    ctx.fillStyle=C.sandDk;
+    const go = Math.round(dist)%16;
+    for(let x=-go;x<W;x+=16){ ctx.fillRect(x,GROUND+4,6,1); ctx.fillRect(x+9,GROUND+9,3,1); ctx.fillRect(x+4,GROUND+14,2,1); }
+
+    // monedas
+    for(const c of coins) ctx.drawImage(coin[(frame>>5)&1], Math.round(c.x), c.y);
+    // obstáculos
+    for(const o of obstacles){
+      for(let s=0;s<o.stack;s++) for(let i=0;i<o.t.n;i++) ctx.drawImage(o.t.img, Math.round(o.x+i*o.t.w), o.y+s*o.t.h);
+    }
+    // jugador
+    let img = state==='over'?dead : !p.onGround?jump : ((frame>>(speed>4?2:3))&1)?runA:runB;
+    if(state==='ready') img = ((frame>>5)&1)?runA:runB;
+    ctx.drawImage(img, p.x, Math.round(p.y));
+    // partículas
+    for(const q of parts){ ctx.fillStyle=q.col; ctx.fillRect(Math.round(q.x),Math.round(q.y),1,1); }
+    ctx.restore();
+
+    // HUD
+    const sc = String(score).padStart(5,'0');
+    text(sc, W-6, 6, flash&&(flash>>1)%2?C.sand:C.bone, 8, 'right');
+    if(popup) text('+25', Math.round(popup.x), Math.round(popup.y)-6, C.sand, 6);
+
+    if(state==='ready'){
+      text('BRINCO NOCTURNO', W/2, 34, C.sand, 10, 'center');
+      if((frame>>5)&1) text('TOCA O ESPACIO PARA EMPEZAR', W/2, 54, C.bone, 6, 'center');
+    }
+    if(state==='over'){
+      text('¡TE CAÍSTE!', W/2, 30, C.coral, 10, 'center');
+      text(newBest?'¡NUEVO RÉCORD!':'RÉCORD '+best, W/2, 48, newBest?C.mint:C.dim, 6, 'center');
+      if(performance.now()-overAt>450 && (frame>>5)&1) text('TOCA PARA REINTENTAR', W/2, 62, C.bone, 6, 'center');
+    }
+  }
+
+  // ---------- Bucle con paso fijo (60 pasos/seg) ----------
+  let last=performance.now(), acc=0;
+  function loop(now){
+    acc += Math.min(100, now-last); last=now;
+    while(acc >= 1000/60){ step(); acc -= 1000/60; }
+    draw();
+    requestAnimationFrame(loop);
+  }
+  (document.fonts?document.fonts.ready:Promise.resolve()).then(()=>requestAnimationFrame(loop));
+})();
+</script>
